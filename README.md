@@ -14,6 +14,8 @@ No kernel driver and no third-party driver: it uses Microsoft's built-in WinUSB 
 
 <p align="center"><b><a href="../../releases/latest">⬇ Download AiptekTablet.exe (latest release)</a></b></p>
 
+<p align="center"><img src="docs/screenshot-settings.png" alt="Settings window: monitor selection, tablet area and pressure calibration" width="800"></p>
+
 ## Install
 
 1. Plug in the tablet.
