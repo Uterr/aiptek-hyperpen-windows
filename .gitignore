@@ -1,0 +1,13 @@
+# build output
+build/
+dist/
+*.spec
+icon.ico
+__pycache__/
+*.pyc
+
+# personal settings / logs (the app keeps its real settings in %APPDATA%\AiptekTablet)
+config.json
+config.json.tmp
+*.log
+calib_candidate.json
