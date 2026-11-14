@@ -13,7 +13,8 @@ if sys.stdout is None:  # windowed exe: no console
 
 APP_NAME = "AiptekTablet"
 DISPLAY_NAME = "Aiptek HyperPen 12000U Tablet Driver"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
+REPO_URL = "https://github.com/Uterr/aiptek-hyperpen-windows"
 FROZEN = getattr(sys, "frozen", False)
 INSTALL_DIR = os.path.join(os.environ["LOCALAPPDATA"], "Programs", APP_NAME)
 INSTALLED_EXE = os.path.join(INSTALL_DIR, APP_NAME + ".exe")
@@ -313,6 +314,18 @@ def tray():
     def do_uninstall(*_):
         launch("--uninstall")
 
+    def show_about(*_):
+        def run():  # message box in its own thread so the tray menu stays responsive
+            text = (f"{DISPLAY_NAME}\nVersion {VERSION}\n\n"
+                    "Open-source driver for Aiptek HyperPen tablets on Windows 10/11.\n"
+                    "Tablet protocol based on the Linux kernel's aiptek driver.\n"
+                    "License: MIT\n\n"
+                    f"{REPO_URL}\n\n"
+                    "Open the project page on GitHub?")
+            if msgbox(text, MB_YESNO | MB_ICONINFO) == IDYES:
+                os.startfile(REPO_URL)
+        threading.Thread(target=run, daemon=True).start()
+
     def quit_app(*_):
         icon.stop()
 
@@ -325,6 +338,8 @@ def tray():
                          visible=is_installed_copy() or autostart_enabled()),
         pystray.MenuItem("Open log", open_log),
         pystray.MenuItem("Uninstall...", do_uninstall, visible=is_installed_copy()),
+        pystray.MenuItem("About...", show_about),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Exit", quit_app),
     )
 
