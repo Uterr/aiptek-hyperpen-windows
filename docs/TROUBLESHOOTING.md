@@ -74,6 +74,16 @@ Two effects add up:
 
 **Smoothing** reduces jitter but not these slow waves, and it adds lag.
 
+## Tiny circles look like squares
+
+The tablet's firmware holds each axis until the pen has moved a minimum step, so very small, slow strokes
+turn into staircases. Make sure **Sensor resolution** is **3048 lpi** (the default since v1.1). That makes
+the step six times smaller and tiny circles much rounder. **Small-stroke rounding** can help a little more,
+but it's off by default because the difference is subtle.
+
+If another tablet model gets a garbled or shrunken cursor at 3048 lpi, set Sensor resolution to 500 lpi and
+please report it.
+
 ## SmartScreen / antivirus warnings
 
 The exe is not code-signed, so SmartScreen warns on first run (*More info → Run anyway*). Some antivirus

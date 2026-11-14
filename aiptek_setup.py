@@ -26,7 +26,10 @@ class PenReader(threading.Thread):
         self.source = ""
         self.tab = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("127.0.0.1", drv.MONITOR_PORT))
+        try:
+            self.sock.bind(("127.0.0.1", drv.MONITOR_PORT))
+        except OSError:  # another settings window already listens; this one just shows no live pen
+            pass
         self.sock.settimeout(0.5)
 
     def feed(self, r):
@@ -88,6 +91,7 @@ class Setup(tk.Tk):
         if not self.cfg["area"]:
             self.cfg["area"] = drv.max_area((self.tw, self.th), self.aspect())
         self.seen = [None, None, None, None]   # min x, min y, max x, max y reached by the pen
+        self.beyond_count = 0  # consecutive reports beyond the tablet outline
         self.drag = None
         self.save_job = None
 
@@ -123,22 +127,6 @@ class Setup(tk.Tk):
         ttk.Label(row, text="snap\nposition").pack(side="left")
         ttk.Checkbutton(row, text="Stretch: use the whole tablet\n(shapes get distorted)", variable=self.stretch,
                         command=self.on_stretch).pack(side="left", padx=16)
-        side = ttk.Frame(row)
-        side.pack(side="right")
-        ttk.Label(side, text="Pen side button:").pack(anchor="w")
-        self.barrel = tk.StringVar(value=self.cfg["barrel"])
-        ttk.OptionMenu(side, self.barrel, self.barrel.get(), "right", "middle", "none",
-                       command=lambda v: self.schedule_save()).pack(anchor="w")
-
-        row2 = ttk.Frame(frm)
-        row2.pack(fill="x", pady=(8, 0))
-        ttk.Label(row2, text="Smoothing:").pack(side="left")
-        self.smoothing = tk.StringVar(value=self.cfg.get("smoothing", "off"))
-        ttk.OptionMenu(row2, self.smoothing, self.smoothing.get(), *drv.SMOOTHING.keys(),
-                       command=lambda v: self.schedule_save()).pack(side="left", padx=(4, 16))
-        self.coil = tk.BooleanVar(value=bool(self.cfg.get("coil_correction", True)))
-        ttk.Checkbutton(row2, text="Coil correction (straighter diagonals)", variable=self.coil,
-                        command=self.schedule_save).pack(side="left")
 
         self.info = ttk.Label(frm, text="", font=("Consolas", 9))
         self.info.pack(anchor="w", pady=(6, 0))
@@ -185,6 +173,34 @@ class Setup(tk.Tk):
                              round(math.log(pc["curve"], 3), 2), lambda v: self.set_p("curve", round(3 ** v, 3)))
         ttk.Button(pf, text="Reset pressure defaults", command=self.reset_pressure).pack(anchor="w", pady=(6, 0))
         self.draw_curve()
+        self.build_options_panel(pf)
+
+    def build_options_panel(self, pf):
+        # option buttons instead of drop-down menus: Tk posts menus on the main monitor when the window is on a
+        # monitor above/left of it (negative screen coordinates)
+        ttk.Label(pf, text="4. Pen options", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(16, 2))
+
+        def group(label, var, values, texts=None):
+            ttk.Label(pf, text=label).pack(anchor="w", pady=(6, 0))
+            row = ttk.Frame(pf)
+            row.pack(anchor="w")
+            for v, t in zip(values, texts or values):
+                ttk.Radiobutton(row, text=t, value=v, variable=var, command=self.schedule_save).pack(side="left",
+                                                                                                padx=(0, 8))
+
+        self.barrel = tk.StringVar(value=self.cfg["barrel"])
+        group("Side button:", self.barrel, ["right", "middle", "none"], ["right click", "middle click", "nothing"])
+        self.lpi = tk.StringVar(value=f"{self.cfg.get('resolution_lpi', 3048)} lpi")
+        group("Sensor resolution (finer = rounder small strokes):", self.lpi,
+              ["500 lpi", "1000 lpi", "2000 lpi", "3048 lpi"], ["500", "1000", "2000", "3048 lpi"])
+        self.smoothing = tk.StringVar(value=self.cfg.get("smoothing", "off"))
+        group("Smoothing (adds a little lag):", self.smoothing, list(drv.SMOOTHING.keys()))
+        self.rounding = tk.StringVar(
+            value={0: "off", 1: "light", 2: "strong"}.get(int(self.cfg.get("rounding", 0)), "off"))
+        group("Small-stroke rounding:", self.rounding, ["off", "light", "strong"])
+        self.coil = tk.BooleanVar(value=bool(self.cfg.get("coil_correction", True)))
+        ttk.Checkbutton(pf, text="Coil correction (straighter diagonals)", variable=self.coil,
+                        command=self.schedule_save).pack(anchor="w", pady=(8, 0))
 
     def set_p(self, key, v):
         pc = self.cfg["pressure"]
@@ -387,6 +403,8 @@ class Setup(tk.Tk):
         self.cfg["barrel"] = self.barrel.get()
         self.cfg["smoothing"] = self.smoothing.get()
         self.cfg["coil_correction"] = self.coil.get()
+        self.cfg["resolution_lpi"] = int(self.lpi.get().split()[0])
+        self.cfg["rounding"] = {"off": 0, "light": 1, "strong": 2}[self.rounding.get()]
         self.cfg["stretch"] = self.stretch.get()
         self.cfg["tablet_size"] = [self.tw, self.th]
         drv.save_config(self.cfg)
@@ -461,7 +479,12 @@ class Setup(tk.Tk):
             self.pen_lbl.config(text="Tablet not found - is it plugged in?")
         elif lat and time.monotonic() - lat[4] < 0.3 and lat[2] & 0x07:
             x, y, st, p, _ = lat
-            if x > self.tw or y > self.th:  # tablet reaches further than it claims: grow the outline
+            # tablet reaches further than it claims: grow the outline, but only for a sustained, plausible overshoot
+            # (a few stray reports, e.g. while the resolution is being switched, must not resize the tablet)
+            beyond = (self.tw < x <= self.tw * 1.25) or (self.th < y <= self.th * 1.25)
+            self.beyond_count = self.beyond_count + 1 if beyond else 0
+            if self.beyond_count >= 40:
+                self.beyond_count = 0
                 self.tw, self.th = max(self.tw, x), max(self.th, y)
                 self.S = (TAB_CW - 2 * PAD) / self.tw
                 self.tc.config(height=int(self.th * self.S) + 2 * PAD)

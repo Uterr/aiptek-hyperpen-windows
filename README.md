@@ -8,6 +8,7 @@ Windows XP/Vista; on Windows 10/11 the tablet only works as a *relative* mouse. 
 * **pressure** works (as a Windows Ink pen) in Clip Studio Paint, Krita, Photoshop, OneNote, Paint, ...;
 * you choose the **monitor** and the **part of the tablet** to use, so shapes keep their proportions;
 * pressure range and curve are **calibrated to your hand**;
+* it reads the sensor at up to **3048 lpi** (older drivers used 500 lpi), so small strokes stay round;
 * there is a correction for this tablet's wavy diagonals.
 
 No kernel driver and no third-party driver: it uses Microsoft's built-in WinUSB driver and runs as a small tray app.
@@ -38,6 +39,8 @@ That's all: no Python or other software is needed. The app installs to `%LOCALAP
 | **Pressure** | *Measure my hardest press*, then press as hard as you normally draw for 5 s. *Light touch starts at* and *Curve* (soft ↔ firm) fine-tune it; the graph shows what apps receive. |
 | **Pen side button** | Right click (default), middle click or nothing. |
 | **Coil correction** | Removes the HyperPen 12000U's small regular ripple on diagonal lines (on by default). |
+| **Sensor resolution** | 3048 lpi (default) reads the pen six times finer than the 500 lpi older drivers used, so small strokes and tiny circles stay round. |
+| **Small-stroke rounding** | Optional: fills in the firmware's per-axis "sticking" on very slow, tiny strokes. Off by default. |
 | **Smoothing** | Optional adaptive filter. Adds a little lag; usually not needed. |
 
 Changes apply immediately while you draw. Settings are stored in `%APPDATA%\AiptekTablet\config.json`.

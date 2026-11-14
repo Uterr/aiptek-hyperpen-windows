@@ -13,7 +13,7 @@ if sys.stdout is None:  # windowed exe: no console
 
 APP_NAME = "AiptekTablet"
 DISPLAY_NAME = "Aiptek HyperPen 12000U Tablet Driver"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 FROZEN = getattr(sys, "frozen", False)
 INSTALL_DIR = os.path.join(os.environ["LOCALAPPDATA"], "Programs", APP_NAME)
 INSTALLED_EXE = os.path.join(INSTALL_DIR, APP_NAME + ".exe")

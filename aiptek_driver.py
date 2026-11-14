@@ -60,6 +60,11 @@ DEFAULT_CONFIG = {
     "barrel": "right",             # side button: right | middle | none
     "smoothing": "off",            # off | light | medium | strong  (adaptive 1-euro filter)
     "coil_correction": True,
+    # small-stroke rounding: undo the firmware's per-axis hold (units of hold band; 0 = off, 1 = light, 2 = strong)
+    "rounding": 0,
+    # sensor resolution to read at (500/1000/2000/3048 lpi). Finer = smaller firmware hold steps, rounder small
+    # strokes. Settings (area, calibration) stay in 500-lpi units; the extra precision is kept as fractions.
+    "resolution_lpi": 3048,
     # raw pressure range actually produced by the pen (tip-down starts ~70; the tablet has 512 levels)
     # curve: output = f ** curve  (<1 soft: easy to reach full pressure, >1 firm)
     "pressure": {"min": 60, "max": 400, "curve": 1.0},
@@ -96,6 +101,33 @@ class OneEuro:
         a = self._alpha(self.mincutoff + self.beta * abs(self.dx), dt)
         self.x = a * v + (1 - a) * self.x
         return self.x
+
+
+class HoldInterp:
+    """Undo the firmware's per-axis hold on small, slow movements.
+
+    The tablet only reports a new X (or Y) once the pen has moved a couple of units, so slow curves arrive as
+    staircases and tiny circles look like rounded squares. While an axis is held, keep it moving at the speed of
+    its last step, by at most `h` units (the hold band), so curves stay round without adding lag.
+    """
+
+    def __init__(self, h, decay=1.5):
+        self.h, self.decay, self.v = h, decay, None
+
+    def __call__(self, v, t):
+        if self.v is None:
+            self.v, self.tc, self.vel, self.hold = v, t, 0.0, 0.0
+            return v
+        if v != self.v:
+            dt = t - self.tc
+            self.vel = (v - self.v) / dt if 0 < dt < 0.3 else 0.0
+            self.hold = dt
+            self.v, self.tc = v, t
+            return v
+        el = t - self.tc
+        if el > self.decay * max(self.hold, 0.016) + 0.05:  # held much longer than before: pen slowed or stopped
+            self.vel *= 0.5
+        return v + max(-self.h, min(self.h, self.vel * el))
 
 
 def map_pressure(p, pc):
@@ -266,6 +298,8 @@ class Driver:
         self.last_xy = (0, 0)
         self.frame = 0
         self.pid = None
+        self.scale = 1.0  # raw units per 500-lpi unit
+        self.suspend_until = 0.0  # ignore reports until then (resolution being switched)
         self.make_filters()
 
     def recompute_mapping(self, announce=False):
@@ -295,6 +329,8 @@ class Driver:
     def make_filters(self):
         preset = SMOOTHING.get(self.cfg.get("smoothing"), None)
         self.filters = (OneEuro(*preset), OneEuro(*preset)) if preset else None
+        h = float(self.cfg.get("rounding") or 0)
+        self.holds = (HoldInterp(h), HoldInterp(h)) if h > 0 else None
 
     def config_changed(self):
         self.cfg = load_config()
@@ -304,15 +340,17 @@ class Driver:
     def refine(self, x, y, in_range):
         """Coil correction + smoothing in tablet units (float)."""
         if not in_range:
-            if self.filters and self.filters[0].t is not None:
+            if (self.filters and self.filters[0].t is not None) or (self.holds and self.holds[0].v is not None):
                 self.make_filters()  # restart the filter on the next approach, no smear from the old position
             return x, y
+        t = time.perf_counter()
+        if self.holds:
+            x, y = self.holds[0](x, t), self.holds[1](y, t)
         # the bundled calibration was measured on a HyperPen 12000U (08CA:0010)
         if self.cfg.get("coil_correction") and self.cfg.get("calibration") and self.pid == 0x0010:
             cal = self.cfg["calibration"]
             x, y = coil_correct(x, cal, "x"), coil_correct(y, cal, "y")
         if self.filters:
-            t = time.perf_counter()
             x, y = self.filters[0](x, t), self.filters[1](y, t)
         return x, y
 
@@ -353,11 +391,17 @@ class Driver:
             send_mouse(MOUSE_BUTTONS[which][0 if press else 1])
 
     # ---- report handling
+    def suspended(self):
+        return time.monotonic() < self.suspend_until
+
     def handle(self, r):
+        if self.suspended():
+            return
         rep = parse_report(r)
         if not rep:
             return
         x, y, st, p = rep
+        x, y = x / self.scale, y / self.scale  # -> 500-lpi units (float)
         in_range = bool(st & (ST_INRANGE | ST_NEAR | ST_TIP))
         tip = bool(st & ST_TIP)
         lower, upper = bool(st & ST_BTN_LOWER), bool(st & ST_BTN_UPPER)
@@ -479,6 +523,19 @@ class DriverService:
             if m != mtime:
                 if mtime is not None or m is not None:
                     drv.config_changed()
+                    tab = state.get("tab")
+                    lpi = drv.cfg.get("resolution_lpi", 500)
+                    if tab and lpi != getattr(self, "lpi_applied", lpi):
+                        drv.suspend_until = time.monotonic() + 60
+                        drv.release_all()
+                        try:
+                            size, scale = tablet_io.setup_resolution(tab, lpi)
+                            set_mode(tab, True)
+                            drv.scale = scale
+                        finally:
+                            drv.suspend_until = time.monotonic() + 0.15  # let reports in flight drain
+                        self.lpi_applied = lpi
+                        log(f"Resolution changed: reading at {round(500 * scale)} lpi.")
                 mtime = m
             elif tick % 3 == 0:
                 drv.recompute_mapping()  # resolution / layout changes
@@ -504,11 +561,16 @@ class DriverService:
                 stop.wait(2)
                 continue
             waiting_logged = False
-            size = tablet_io.query_size(tab)
+            drv.suspend_until = time.monotonic() + 60
+            size, scale = tablet_io.setup_resolution(tab, drv.cfg.get("resolution_lpi", 500))
             set_mode(tab, True)
+            drv.scale = scale
+            drv.suspend_until = time.monotonic() + 0.15  # drop reports queued during setup
             drv.set_tablet(tab.vid, tab.pid, size)
+            self.lpi_applied = drv.cfg.get("resolution_lpi", 500)
             log(f"Tablet {tab.vid:04X}:{tab.pid:04X} connected via {tab.kind}, absolute mode enabled,"
-                f" active area {size or 'unknown (using configured size)'}.")
+                f" active area {size or 'unknown (using configured size)'} at 500 lpi,"
+                f" reading at {round(500 * scale)} lpi.")
             if tab.kind == "HID":
                 log("  note: on the stock HID driver Windows also handles the pen itself (double input);"
                     " switch this USB port to WinUSB to fix it.")
@@ -520,8 +582,14 @@ class DriverService:
                     if r is None:
                         continue
                     state["last_report"] = time.monotonic()
+                    if drv.suspended():
+                        continue
                     drv.handle(r)
-                    try:
+                    try:  # forward in 500-lpi units, like the settings use
+                        if drv.scale != 1.0 and len(r) >= 8 and r[0] == 2:
+                            xs = min(65535, round((r[1] | r[2] << 8) / drv.scale))
+                            ys = min(65535, round((r[3] | r[4] << 8) / drv.scale))
+                            r = bytes((2, xs & 255, xs >> 8, ys & 255, ys >> 8)) + r[5:8]
                         mon.sendto(r, ("127.0.0.1", MONITOR_PORT))
                     except OSError:
                         pass

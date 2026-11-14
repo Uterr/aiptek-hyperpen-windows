@@ -158,9 +158,15 @@ class HidTablet:
                 setattr(self, a, None)
 
 
-def set_mode(tab, absolute):
-    """Resolution 500 lpi, tablet/mouse mode, macro keys on, auto gain on (Linux aiptek.c sequence)."""
-    for c, d in ((0x18, 0x04), (0x10, 0x01 if absolute else 0x00), (0x11, 0x02), (0x12, 0xFF)):
+# cmd 0x18 resolution codes (HyperPen 12000U; probed with tools/firmware_probe.py). 0x04 is what Linux uses.
+# NOTE: switching to tablet mode (0x10 0x01) resets the resolution to 500 lpi, so 0x18 must come AFTER 0x10.
+RESOLUTION_CODES = {500: 0x04, 1000: 0x06, 2000: 0x08, 3048: 0x0C}
+
+
+def set_mode(tab, absolute, res_code=None):
+    """Tablet/mouse mode, then resolution, macro keys on, auto gain on."""
+    res_code = getattr(tab, "res_code", 0x04) if res_code is None else res_code
+    for c, d in ((0x10, 0x01 if absolute else 0x00), (0x18, res_code), (0x11, 0x02), (0x12, 0xFF)):
         if not tab.command(c, d):
             return False
         time.sleep(0.02)
@@ -176,13 +182,32 @@ def query(tab, c, d, delay=0.4):
     return (r[1] | r[2] << 8) if r and r[0] == 2 else None
 
 
-def query_size(tab):
-    """(max x, max y) of the active area at 500 lpi, or None if the tablet doesn't answer sensibly."""
-    tab.command(0x18, 0x04)  # 500 lpi, as used for the coordinates
+def query_size(tab, res_code=0x04):
+    """(max x, max y) of the active area at the given resolution, or None if the tablet doesn't answer sensibly."""
+    tab.command(0x18, res_code)
     x, y = query(tab, 0x01, 0x00), query(tab, 0x01, 0x01)
-    if x and y and 500 <= x <= 30000 and 500 <= y <= 30000:
+    if x and y and 500 <= x <= 65535 and 500 <= y <= 65535:
         return x, y
     return None
+
+
+def setup_resolution(tab, lpi):
+    """Pick the finest working resolution <= lpi. Returns (size at 500 lpi, scale = raw units per 500-lpi unit).
+
+    The scale is measured from the reported extents, not assumed, so a model that ignores a code falls back to
+    500 lpi. Call set_mode() afterwards: it applies tab.res_code after the mode switch.
+    """
+    base = query_size(tab, 0x04)
+    tab.res_code, scale = 0x04, 1.0
+    for want in sorted((v for v in RESOLUTION_CODES if 500 < v <= lpi), reverse=True):
+        hi = query_size(tab, RESOLUTION_CODES[want])
+        if base and hi:
+            sx, sy = hi[0] / base[0], hi[1] / base[1]
+            if sx > 1.05 and abs(sx - sy) / sx < 0.02:
+                tab.res_code, scale = RESOLUTION_CODES[want], sx
+                break
+    tab.scale = scale
+    return base, scale
 
 
 def _digitizer_collection(path):

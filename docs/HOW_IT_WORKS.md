@@ -15,13 +15,51 @@ and queries are read back with `GET_REPORT(Feature, id 2)`, the same as the Linu
 
 | cmd, data | Meaning |
 |---|---|
-| `18 04` | resolution 500 lpi |
-| `10 01` / `10 00` | **switch to tablet (absolute) mode** / back to mouse mode |
+| `10 01` / `10 00` | **switch to tablet (absolute) mode** / back to mouse mode. *Resets the resolution to 500 lpi.* |
+| `18 nn` | resolution (send **after** `10 01`), see below |
 | `11 02` | enable macro keys |
 | `12 FF` | auto gain on |
-| `01 00` / `01 01` | query X / Y extent (12000U: 6000 × 4500 = 12" × 9" at 500 lpi) |
+| `01 00` / `01 01` | query X / Y extent at the current resolution (12000U: 6000 × 4500 at 500 lpi) |
 | `08 00` | query pressure levels (512) |
 | `02 00` | query model code |
+
+### Resolution: up to 3048 lpi
+
+The Linux driver uses `18 04` (500 lpi). The firmware accepts more codes, and the reported extent and the pen
+coordinates change accordingly, **but only if the resolution command comes after the switch to tablet mode**.
+`10 01` silently resets the resolution to 500 lpi, so sending `18 nn` first (as Linux does) always ends up at
+500 lpi.
+
+| `18 nn` | lpi | active area (12000U) |
+|---|---|---|
+| `00` / `01` / `02` / `03` | 100 / 200 / 254 / 400 | 1200×900 / 2400×1800 / 3048×2286 / 4800×3600 |
+| `04` | 500 | 6000 × 4500 |
+| `05` | 508 | 6096 × 4572 |
+| `06` / `07` | 1000 / 1016 | 12000 × 9000 / 12192 × 9144 |
+| `08` / `09` | 2000 / 2032 | 24000 × 18000 / 24384 × 18288 |
+| `0A` / `0B` | 2540 / 3000 | 30480 × 22860 / 36000 × 27000 |
+| `0C` | **3048** | **36576 × 27432** |
+
+Why it matters: the firmware only reports a new X (or Y) once the pen has moved by a minimum number of
+*output units*, a per-axis hold. At 500 lpi that is about 0.1–0.2 mm, so slow, tiny strokes come out as
+staircases and small circles look like rounded squares. At 3048 lpi the hold band is six times smaller. Measured
+on tiny circles (`tools/resolution_compare.py`): the share of the path running exactly horizontal or vertical
+drops from **0.75 to 0.44** (a true circle: ~0.22), and reports where both axes changed rise from ~8% to ~50%.
+
+The driver uses 3048 lpi by default (setting *Sensor resolution*). It measures the scale factor from the
+extents reported at both resolutions and falls back to 500 lpi if a model doesn't respond the same way. All
+settings stay in 500-lpi units, and the extra precision is kept as fractions.
+
+### Other commands tried
+
+* `17 nn` (*FilterOn* in the Linux driver): no value made strokes smoother than the power-on default. `17 00`
+  freezes the pen completely, and `17 01` / `17 03` make it much more "sticky". Not used.
+* `12 00` (auto gain off): the pen is barely detected. Keep `12 FF`.
+* `10 02` / `10 03` / `10 04`: no reports at all.
+
+All of these are volatile: replugging the tablet restores the power-on state.
+
+### Reports
 
 In tablet mode the stylus sends 8-byte reports at about 125 Hz:
 
@@ -63,7 +101,7 @@ The process is per-monitor DPI aware, so all coordinates are physical pixels.
 ## Pipeline
 
 ```
-raw report ─► coil correction ─► smoothing (optional) ─► area → monitor mapping ─► pen injection
+raw report ─► ÷ scale (to 500-lpi units) ─► small-stroke rounding (optional) ─► coil correction ─► smoothing (optional) ─► area → monitor mapping ─► pen injection
                 (x += fx(x),       (1€ filter)              (aspect-locked rect      (pressure via
                  y += fy(y))                                 on the tablet)            range + curve)
 ```

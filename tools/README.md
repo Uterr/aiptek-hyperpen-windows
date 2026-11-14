@@ -12,10 +12,17 @@ can open the tablet through WinUSB.
 | `diag_cursor.py [s]` | either | Tablet mode **without** injection: logs whether Windows moves the cursor by itself. |
 | `diag_devices.py` | either | Lists Windows pointer devices and their display mapping; tests hover injection. |
 | `diag_inject.py` | — | Injects pen hover at known points and reads back the cursor position. |
+| `firmware_probe.py` | either | Queries model/firmware/pressure levels and the extent reported for every resolution code. |
+| `resolution_check.py` | either | Shows that the resolution must be set *after* the tablet-mode switch (hover at the bottom-right corner). |
+| `mode_explore.py` | either | Tries command sequences (mode/resolution order, auto gain, other modes) and prints report IDs and ranges. |
+| `resolution_compare.py` | either | Tiny circles at 500 vs 3048 lpi, alternating; reports how boxy each is. |
+| `filter_compare.py` | either | Tiny circles with each `0x17` firmware filter value (none helps; some freeze the pen). |
+| `eval_small_strokes.py [csv]` | — | Offline: boxiness of recorded tiny circles with the driver's filters. |
 | `record.py S out.csv` | driver running | Records raw reports forwarded by the running driver (UDP 47812). Close the settings window first, since it uses the same port. |
 | `analyze_lines.py [csv]` | — | Analyzes ruler strokes: noise vs. periodic wobble, report rate. |
 | `fit_calib.py csv...` | — | Fits the periodic coil correction (period scan, cross-validated) and writes `calib_candidate.json`. |
 
+`data/tiny_circles_12000U.csv` holds tiny circles recorded at 500 lpi.
 `data/ruler_strokes_12000U.csv` holds the ruler strokes the bundled 12000U calibration was fitted from.
 
 ## Calibrating coil correction for another tablet
