@@ -52,7 +52,8 @@ choose, pick Windows Ink:
 
 * **Clip Studio Paint**: *File → Preferences → Tablet → Tablet service: **TabletPC*** (it often defaults to
   Wintab, which gives no pressure).
-* **Krita**: *Settings → Configure Krita → Tablet settings → **Windows 8+ Pointer Input***.
+* **Krita**: *Settings → Configure Krita → Tablet settings → **Windows 8+ Pointer Input***, then
+  **restart Krita** (the default is WinTab, which gives no pressure; the change only applies after a restart).
 * **Photoshop**: Windows Ink is the default. If you've disabled it via `PSUserConfig.txt`, re-enable it.
 * **Paint, OneNote, Whiteboard, Fresh Paint, Edge** work out of the box.
 

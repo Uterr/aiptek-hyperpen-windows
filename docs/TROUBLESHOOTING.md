@@ -10,7 +10,10 @@ The driver sends a **Windows Ink** pen. It does **not** provide **Wintab** (the 
 
 * **Clip Studio Paint**: *File → Preferences → Tablet → Tablet service* → **TabletPC**, then restart Clip
   Studio. With *Wintab* selected you get lines without pressure.
-* **Krita**: *Settings → Configure Krita → Tablet settings* → **Windows 8+ Pointer Input (Windows Ink)**.
+* **Krita**: *Settings → Configure Krita → Tablet settings* → **Windows 8+ Pointer Input (Windows Ink)**,
+  click OK, then **close and restart Krita**: the tablet API is only chosen at startup. Krita's default is
+  WinTab, which gives lines without pressure. Check with **Open Tablet Tester** on the same page: it should
+  log changing pressure values.
 * **Photoshop**: uses Windows Ink unless `UseSystemStylus 0` is set in a `PSUserConfig.txt`; remove it.
 * **GIMP**: *Edit → Input Devices*, set the pen device to *Screen* mode.
 * Apps that support **only Wintab** (some older software, e.g. old versions of Painter or SAI 1) won't get
